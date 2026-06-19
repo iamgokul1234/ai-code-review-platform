@@ -1,11 +1,13 @@
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const User = require("./models/User");
-const authMiddleware = require("./middleware/auth");
-
 require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const { Octokit } = require("octokit");
+
+const User = require("./models/User");
+const Review = require("./models/Review");
+const authMiddleware = require("./middleware/auth");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -72,6 +74,7 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+// Create a review (protected)
 app.post("/api/reviews", authMiddleware, async (req, res) => {
   try {
     const review = new Review({ ...req.body, userId: req.userId });
@@ -82,22 +85,57 @@ app.post("/api/reviews", authMiddleware, async (req, res) => {
   }
 });
 
-const Review = require("./models/Review");
-
-app.post("/api/reviews", async (req, res) => {
-  try {
-    const review = new Review(req.body);
-    await review.save();
-    res.status(201).json(review);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
+// Get all reviews
 app.get("/api/reviews", async (req, res) => {
   try {
     const reviews = await Review.find();
     res.json(reviews);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get authenticated user's GitHub repos
+app.get("/api/github/repos", authMiddleware, async (req, res) => {
+  try {
+    const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+
+    const response = await octokit.rest.repos.listForAuthenticatedUser({
+      sort: "updated",
+      per_page: 10,
+    });
+
+    const repos = response.data.map((repo) => ({
+      name: repo.name,
+      fullName: repo.full_name,
+      private: repo.private,
+      url: repo.html_url,
+      defaultBranch: repo.default_branch,
+    }));
+
+    res.json(repos);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get a file's content from a GitHub repo
+app.get("/api/github/file", authMiddleware, async (req, res) => {
+  try {
+    const { owner, repo, path } = req.query;
+
+    if (!owner || !repo || !path) {
+      return res.status(400).json({ error: "owner, repo, and path are required" });
+    }
+
+    const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+
+    const response = await octokit.rest.repos.getContent({ owner, repo, path });
+
+    // File content comes back Base64-encoded
+    const content = Buffer.from(response.data.content, "base64").toString("utf-8");
+
+    res.json({ fileName: response.data.name, content });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
