@@ -1,21 +1,19 @@
 const mongoose = require("mongoose");
 
-const reviewSchema = new mongoose.Schema({
-  repoName: {
+const userSchema = new mongoose.Schema({
+  username: {
     type: String,
     required: true,
+    unique: true,
   },
-  fileName: {
+  email: {
     type: String,
     required: true,
+    unique: true,
   },
-  feedback: {
+  password: {
     type: String,
     required: true,
-  },
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
   },
   createdAt: {
     type: Date,
@@ -23,4 +21,4 @@ const reviewSchema = new mongoose.Schema({
   },
 });
 
-module.exports = mongoose.model("Review", reviewSchema);
+module.exports = mongoose.model("User", userSchema);
