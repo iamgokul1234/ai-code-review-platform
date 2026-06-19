@@ -9,6 +9,7 @@ const { ESLint } = require("eslint");
 const User = require("./models/User");
 const Review = require("./models/Review");
 const authMiddleware = require("./middleware/auth");
+const { GoogleGenAI } = require("@google/genai");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -172,6 +173,41 @@ app.post("/api/analyze", authMiddleware, async (req, res) => {
       fileName: fileName || "submitted-code.js",
       issueCount: issues.length,
       issues,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/ai-review", authMiddleware, async (req, res) => {
+  try {
+    const { code, fileName } = req.body;
+
+    if (!code) {
+      return res.status(400).json({ error: "code is required" });
+    }
+
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+    const prompt = `You are a senior software engineer doing a code review.
+Review the following file (${fileName || "unnamed file"}) and give concise, actionable feedback.
+Focus on: code quality, potential bugs, security concerns, and best practices.
+Keep your response under 200 words, formatted as a short bulleted list.
+
+Code:
+\`\`\`
+${code}
+\`\`\`
+`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+    });
+
+    res.json({
+      fileName: fileName || "unnamed file",
+      feedback: response.text,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
