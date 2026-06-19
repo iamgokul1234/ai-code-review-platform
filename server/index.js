@@ -3,13 +3,14 @@ const express = require("express");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { Octokit } = require("octokit");
-const { ESLint } = require("eslint");
 
 const User = require("./models/User");
 const Review = require("./models/Review");
 const authMiddleware = require("./middleware/auth");
-const { GoogleGenAI } = require("@google/genai");
+
+const { fetchFileContent } = require("./services/githubService");
+const { lintCode } = require("./services/eslintService");
+const { getAIFeedback } = require("./services/geminiService");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -35,7 +36,6 @@ app.post("/api/auth/register", async (req, res) => {
   try {
     const { username, email, password } = req.body;
 
-    // Hash the password before storing it
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = new User({ username, email, password: hashedPassword });
@@ -59,13 +59,11 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(400).json({ error: "Invalid email or password" });
     }
 
-    // Compare submitted password against the stored hash
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ error: "Invalid email or password" });
     }
 
-    // Issue a JWT
     const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
       expiresIn: "7d",
     });
@@ -76,7 +74,7 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// Create a review (protected)
+// Create a review manually (protected)
 app.post("/api/reviews", authMiddleware, async (req, res) => {
   try {
     const review = new Review({ ...req.body, userId: req.userId });
@@ -97,34 +95,10 @@ app.get("/api/reviews", async (req, res) => {
   }
 });
 
-// Get authenticated user's GitHub repos
-app.get("/api/github/repos", authMiddleware, async (req, res) => {
+// Full pipeline: fetch from GitHub -> lint -> AI review -> save
+app.post("/api/review", authMiddleware, async (req, res) => {
   try {
-    const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-
-    const response = await octokit.rest.repos.listForAuthenticatedUser({
-      sort: "updated",
-      per_page: 10,
-    });
-
-    const repos = response.data.map((repo) => ({
-      name: repo.name,
-      fullName: repo.full_name,
-      private: repo.private,
-      url: repo.html_url,
-      defaultBranch: repo.default_branch,
-    }));
-
-    res.json(repos);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get a file's content from a GitHub repo
-app.get("/api/github/file", authMiddleware, async (req, res) => {
-  try {
-    const { owner, repo, path } = req.query;
+    const { owner, repo, path } = req.body;
 
     if (!owner || !repo || !path) {
       return res
@@ -132,82 +106,38 @@ app.get("/api/github/file", authMiddleware, async (req, res) => {
         .json({ error: "owner, repo, and path are required" });
     }
 
-    const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+    // Step 1: Fetch the file from GitHub
+    const { fileName, content } = await fetchFileContent(owner, repo, path);
 
-    const response = await octokit.rest.repos.getContent({ owner, repo, path });
+    // Step 2: Run ESLint static analysis
+    const lintResult = await lintCode(content, fileName);
 
-    // File content comes back Base64-encoded
-    const content = Buffer.from(response.data.content, "base64").toString(
-      "utf-8",
-    );
-
-    res.json({ fileName: response.data.name, content });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/analyze", authMiddleware, async (req, res) => {
-  try {
-    const { code, fileName } = req.body;
-
-    if (!code) {
-      return res.status(400).json({ error: "code is required" });
+    // Step 3: Get AI-generated feedback from Gemini (don't let this fail the whole request)
+    let aiFeedback;
+    try {
+      aiFeedback = await getAIFeedback(content, fileName);
+    } catch (aiErr) {
+      console.error("Gemini call failed:", aiErr.message);
+      aiFeedback = "AI feedback unavailable right now. Please try again later.";
     }
 
-    const eslint = new ESLint({ overrideConfigFile: "eslint.config.js" });
+    // Step 4: Combine everything into a feedback summary
+    const combinedFeedback = `AI Review:\n${aiFeedback}\n\nStatic Analysis: ${lintResult.issueCount} issue(s) found.`;
 
-    const results = await eslint.lintText(code, {
-      filePath: fileName || "submitted-code.js",
+    // Step 5: Save as a Review document
+    const review = new Review({
+      repoName: repo,
+      fileName,
+      feedback: combinedFeedback,
+      userId: req.userId,
     });
+    await review.save();
 
-    const issues = results[0].messages.map((msg) => ({
-      line: msg.line,
-      column: msg.column,
-      severity: msg.severity === 2 ? "error" : "warning",
-      rule: msg.ruleId,
-      message: msg.message,
-    }));
-
-    res.json({
-      fileName: fileName || "submitted-code.js",
-      issueCount: issues.length,
-      issues,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/ai-review", authMiddleware, async (req, res) => {
-  try {
-    const { code, fileName } = req.body;
-
-    if (!code) {
-      return res.status(400).json({ error: "code is required" });
-    }
-
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-    const prompt = `You are a senior software engineer doing a code review.
-Review the following file (${fileName || "unnamed file"}) and give concise, actionable feedback.
-Focus on: code quality, potential bugs, security concerns, and best practices.
-Keep your response under 200 words, formatted as a short bulleted list.
-
-Code:
-\`\`\`
-${code}
-\`\`\`
-`;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-    });
-
-    res.json({
-      fileName: fileName || "unnamed file",
-      feedback: response.text,
+    // Step 6: Return the full result
+    res.status(201).json({
+      review,
+      lintIssues: lintResult.issues,
+      aiFeedback,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
