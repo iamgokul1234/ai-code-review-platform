@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { Octokit } = require("octokit");
+const { ESLint } = require("eslint");
 
 const User = require("./models/User");
 const Review = require("./models/Review");
@@ -125,7 +126,9 @@ app.get("/api/github/file", authMiddleware, async (req, res) => {
     const { owner, repo, path } = req.query;
 
     if (!owner || !repo || !path) {
-      return res.status(400).json({ error: "owner, repo, and path are required" });
+      return res
+        .status(400)
+        .json({ error: "owner, repo, and path are required" });
     }
 
     const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
@@ -133,9 +136,43 @@ app.get("/api/github/file", authMiddleware, async (req, res) => {
     const response = await octokit.rest.repos.getContent({ owner, repo, path });
 
     // File content comes back Base64-encoded
-    const content = Buffer.from(response.data.content, "base64").toString("utf-8");
+    const content = Buffer.from(response.data.content, "base64").toString(
+      "utf-8",
+    );
 
     res.json({ fileName: response.data.name, content });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/analyze", authMiddleware, async (req, res) => {
+  try {
+    const { code, fileName } = req.body;
+
+    if (!code) {
+      return res.status(400).json({ error: "code is required" });
+    }
+
+    const eslint = new ESLint({ overrideConfigFile: "eslint.config.js" });
+
+    const results = await eslint.lintText(code, {
+      filePath: fileName || "submitted-code.js",
+    });
+
+    const issues = results[0].messages.map((msg) => ({
+      line: msg.line,
+      column: msg.column,
+      severity: msg.severity === 2 ? "error" : "warning",
+      rule: msg.ruleId,
+      message: msg.message,
+    }));
+
+    res.json({
+      fileName: fileName || "submitted-code.js",
+      issueCount: issues.length,
+      issues,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
