@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import Review from "./pages/Review";
+import ProtectedRoute from "./components/ProtectedRoute";
 import "./App.css";
 
 function Home() {
@@ -18,6 +20,9 @@ function Home() {
       {username ? (
         <div>
           <p>Welcome back, {username}!</p>
+          <p>
+            <Link to="/review">Go to Review Page</Link>
+          </p>
           <button onClick={handleLogout}>Logout</button>
         </div>
       ) : (
@@ -37,6 +42,14 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route
+          path="/review"
+          element={
+            <ProtectedRoute>
+              <Review />
+            </ProtectedRoute>
+          }
+        />
       </Routes>
     </BrowserRouter>
   );
