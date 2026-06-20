@@ -11,9 +11,16 @@ const authMiddleware = require("./middleware/auth");
 const { fetchFileContent } = require("./services/githubService");
 const { lintCode } = require("./services/eslintService");
 const { getAIFeedback } = require("./services/geminiService");
+const cors = require("cors");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+  }),
+);
 
 app.use(express.json());
 
