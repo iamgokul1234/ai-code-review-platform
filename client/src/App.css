@@ -71,3 +71,20 @@ ul {
 a {
   color: #2563eb;
 }
+
+.ai-feedback {
+  background-color: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 1rem 1.5rem;
+}
+
+.ai-feedback ul {
+  border: none;
+  padding: 0 0 0 1.2rem;
+  margin: 0.5rem 0;
+}
+
+.ai-feedback p {
+  margin: 0.5rem 0;
+}
