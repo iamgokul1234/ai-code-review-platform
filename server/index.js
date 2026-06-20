@@ -3,26 +3,36 @@ const express = require("express");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const cors = require("cors");
 
 const User = require("./models/User");
 const Review = require("./models/Review");
 const authMiddleware = require("./middleware/auth");
+const errorHandler = require("./middleware/errorHandler");
 
 const { fetchFileContent } = require("./services/githubService");
 const { lintCode } = require("./services/eslintService");
 const { getAIFeedback } = require("./services/geminiService");
-const cors = require("cors");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const rateLimit = require("express-rate-limit");
 
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: process.env.CLIENT_URL || "http://localhost:5173",
   }),
 );
 
 app.use(express.json());
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // limit each IP to 10 requests per window
+  message: { error: "Too many attempts. Please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // Connect to MongoDB
 mongoose
@@ -39,7 +49,7 @@ app.post("/api/echo", (req, res) => {
 });
 
 // Register a new user
-app.post("/api/auth/register", async (req, res) => {
+app.post("/api/auth/register", authLimiter, async (req, res, next) => {
   try {
     const { username, email, password } = req.body;
 
@@ -52,23 +62,28 @@ app.post("/api/auth/register", async (req, res) => {
       .status(201)
       .json({ message: "User registered successfully", userId: user._id });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    err.statusCode = 400;
+    next(err);
   }
 });
 
 // Login
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/auth/login", authLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
     const user = await User.findOne({ email });
     if (!user) {
-      return res.status(400).json({ error: "Invalid email or password" });
+      const error = new Error("Invalid email or password");
+      error.statusCode = 401;
+      throw error;
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(400).json({ error: "Invalid email or password" });
+      const error = new Error("Invalid email or password");
+      error.statusCode = 401;
+      throw error;
     }
 
     const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
@@ -77,49 +92,52 @@ app.post("/api/auth/login", async (req, res) => {
 
     res.json({ token, userId: user._id, username: user.username });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
 // Create a review manually (protected)
-app.post("/api/reviews", authMiddleware, async (req, res) => {
+app.post("/api/reviews", authMiddleware, async (req, res, next) => {
   try {
-    const review = new Review({ ...req.body, userId: req.userId });
+    const { repoName, fileName, feedback } = req.body;
+    const review = new Review({
+      repoName,
+      fileName,
+      feedback,
+      userId: req.userId,
+    });
     await review.save();
     res.status(201).json(review);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    err.statusCode = 400;
+    next(err);
   }
 });
 
 // Get all reviews
-app.get("/api/reviews", async (req, res) => {
+app.get("/api/reviews", async (req, res, next) => {
   try {
     const reviews = await Review.find();
     res.json(reviews);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
 // Full pipeline: fetch from GitHub -> lint -> AI review -> save
-app.post("/api/review", authMiddleware, async (req, res) => {
+app.post("/api/review", authMiddleware, async (req, res, next) => {
   try {
     const { owner, repo, path } = req.body;
 
     if (!owner || !repo || !path) {
-      return res
-        .status(400)
-        .json({ error: "owner, repo, and path are required" });
+      const error = new Error("owner, repo, and path are required");
+      error.statusCode = 400;
+      throw error;
     }
 
-    // Step 1: Fetch the file from GitHub
     const { fileName, content } = await fetchFileContent(owner, repo, path);
-
-    // Step 2: Run ESLint static analysis
     const lintResult = await lintCode(content, fileName);
 
-    // Step 3: Get AI-generated feedback from Gemini (don't let this fail the whole request)
     let aiFeedback;
     try {
       aiFeedback = await getAIFeedback(content, fileName);
@@ -128,10 +146,8 @@ app.post("/api/review", authMiddleware, async (req, res) => {
       aiFeedback = "AI feedback unavailable right now. Please try again later.";
     }
 
-    // Step 4: Combine everything into a feedback summary
     const combinedFeedback = `AI Review:\n${aiFeedback}\n\nStatic Analysis: ${lintResult.issueCount} issue(s) found.`;
 
-    // Step 5: Save as a Review document
     const review = new Review({
       repoName: repo,
       fileName,
@@ -140,16 +156,18 @@ app.post("/api/review", authMiddleware, async (req, res) => {
     });
     await review.save();
 
-    // Step 6: Return the full result
     res.status(201).json({
       review,
       lintIssues: lintResult.issues,
       aiFeedback,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
+
+// Centralized error handler - must be registered last
+app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { apiRequest } from "../api";
+import ReactMarkdown from "react-markdown";
 
 function Review() {
   const [owner, setOwner] = useState("");
@@ -65,7 +66,9 @@ function Review() {
           <h3>Results for {result.review.fileName}</h3>
 
           <h4>AI Feedback</h4>
-          <pre style={{ whiteSpace: "pre-wrap" }}>{result.aiFeedback}</pre>
+          <div className="ai-feedback">
+            <ReactMarkdown>{result.aiFeedback}</ReactMarkdown>
+          </div>
 
           <h4>Lint Issues ({result.lintIssues.length})</h4>
           {result.lintIssues.length === 0 ? (
