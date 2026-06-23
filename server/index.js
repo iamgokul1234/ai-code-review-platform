@@ -10,9 +10,14 @@ const Review = require("./models/Review");
 const authMiddleware = require("./middleware/auth");
 const errorHandler = require("./middleware/errorHandler");
 
-const { fetchFileContent } = require("./services/githubService");
+const {
+  fetchFileContent,
+  getPRFiles,
+  postPRComment,
+} = require("./services/githubService");
 const { lintCode } = require("./services/eslintService");
 const { getAIFeedback } = require("./services/geminiService");
+const crypto = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -165,6 +170,88 @@ app.post("/api/review", authMiddleware, async (req, res, next) => {
     next(err);
   }
 });
+
+function verifyGithubSignature(req, res, next) {
+  const signature = req.headers["x-hub-signature-256"];
+  if (!signature) {
+    return res.status(401).json({ error: "No signature provided" });
+  }
+
+  const hmac = crypto.createHmac("sha256", process.env.GITHUB_WEBHOOK_SECRET);
+  const digest = "sha256=" + hmac.update(req.rawBody).digest("hex");
+
+  if (signature !== digest) {
+    return res.status(401).json({ error: "Invalid signature" });
+  }
+
+  next();
+}
+
+app.post(
+  "/api/webhook/github",
+  express.raw({ type: "application/json" }),
+  (req, res, next) => {
+    req.rawBody = req.body;
+    req.body = JSON.parse(req.body.toString());
+    next();
+  },
+  verifyGithubSignature,
+  async (req, res, next) => {
+    try {
+      const event = req.headers["x-github-event"];
+
+      if (
+        event === "pull_request" &&
+        (req.body.action === "opened" || req.body.action === "synchronize")
+      ) {
+        const { owner, repo, pullNumber } = {
+          owner: req.body.repository.owner.login,
+          repo: req.body.repository.name,
+          pullNumber: req.body.pull_request.number,
+        };
+
+        // Respond to GitHub immediately - don't make it wait for the full pipeline
+        res
+          .status(202)
+          .json({ message: "Webhook received, processing review" });
+
+        // Process asynchronously (fire and forget from GitHub's perspective)
+        processPRReview(owner, repo, pullNumber).catch((err) =>
+          console.error("PR review processing failed:", err.message),
+        );
+      } else {
+        res.status(200).json({ message: "Event ignored" });
+      }
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+async function processPRReview(owner, repo, pullNumber) {
+  const files = await getPRFiles(owner, repo, pullNumber);
+
+  let commentBody = `## 🤖 AI Code Review\n\n`;
+
+  for (const file of files) {
+    if (!file.patch) continue; // skip binary files, deletions, etc.
+
+    const lintResult = await lintCode(file.patch, file.filename);
+
+    let aiFeedback;
+    try {
+      aiFeedback = await getAIFeedback(file.patch, file.filename);
+    } catch (err) {
+      aiFeedback = "AI feedback unavailable.";
+    }
+
+    commentBody += `### \`${file.filename}\`\n\n`;
+    commentBody += `**AI Feedback:**\n${aiFeedback}\n\n`;
+    commentBody += `**Lint issues:** ${lintResult.issueCount}\n\n---\n\n`;
+  }
+
+  await postPRComment(owner, repo, pullNumber, commentBody);
+}
 
 // Centralized error handler - must be registered last
 app.use(errorHandler);
