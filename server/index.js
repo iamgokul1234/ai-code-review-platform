@@ -68,6 +68,7 @@ app.post("/api/auth/register", authLimiter, async (req, res, next) => {
     const user = new User({ username, email, password: hashedPassword });
     await user.save();
 
+    
     res
       .status(201)
       .json({ message: "User registered successfully", userId: user._id });
