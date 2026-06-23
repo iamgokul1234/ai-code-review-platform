@@ -29,7 +29,12 @@ app.use(
   }),
 );
 
-app.use(express.json());
+app.use((req, res, next) => {
+  if (req.path === "/api/webhook/github") {
+    return next();
+  }
+  express.json()(req, res, next);
+});
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
