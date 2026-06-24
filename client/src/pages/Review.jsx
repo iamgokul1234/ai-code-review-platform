@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { apiRequest } from "../api";
 import ReactMarkdown from "react-markdown";
+import { apiRequest } from "../api";
 
 function Review() {
   const [owner, setOwner] = useState("");
@@ -30,59 +30,85 @@ function Review() {
   }
 
   return (
-    <div>
-      <h2>Review a File</h2>
+    <div className="container">
+      <div className="eyebrow">review a file</div>
+      <h2>Point this at a file.</h2>
+      <p style={{ color: "var(--text-muted)", marginBottom: "var(--space-6)" }}>
+        Any public GitHub repo you have access to. We'll fetch it, lint it,
+        and ask an AI reviewer what it thinks.
+      </p>
+
       <form onSubmit={handleSubmit}>
-        <input
-          type="text"
-          placeholder="GitHub username (owner)"
-          value={owner}
-          onChange={(e) => setOwner(e.target.value)}
-          required
-        />
-        <input
-          type="text"
-          placeholder="Repository name"
-          value={repo}
-          onChange={(e) => setRepo(e.target.value)}
-          required
-        />
-        <input
-          type="text"
-          placeholder="File path (e.g. server/index.js)"
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-          required
-        />
+        <div className="field">
+          <label htmlFor="owner">Owner</label>
+          <input
+            id="owner"
+            type="text"
+            placeholder="octocat"
+            value={owner}
+            onChange={(e) => setOwner(e.target.value)}
+            required
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="repo">Repository</label>
+          <input
+            id="repo"
+            type="text"
+            placeholder="hello-world"
+            value={repo}
+            onChange={(e) => setRepo(e.target.value)}
+            required
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="path">File path</label>
+          <input
+            id="path"
+            type="text"
+            placeholder="server/index.js"
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            required
+          />
+        </div>
         <button type="submit" disabled={loading}>
-          {loading ? "Reviewing..." : "Review"}
+          {loading ? "Reviewing…" : "Run review"}
         </button>
       </form>
 
-      {error && <p style={{ color: "red" }}>{error}</p>}
+      {error && <div className="error-text">{error}</div>}
 
       {result && (
-        <div>
-          <h3>Results for {result.review.fileName}</h3>
+        <div className="results">
+          <div className="results-file">{result.review.fileName}</div>
 
-          <h4>AI Feedback</h4>
-          <div className="ai-feedback">
-            <ReactMarkdown>{result.aiFeedback}</ReactMarkdown>
+          <div className="terminal">
+            <div className="terminal-header">ai review</div>
+            <div className="terminal-body">
+              <ReactMarkdown>{result.aiFeedback}</ReactMarkdown>
+            </div>
           </div>
 
-          <h4>Lint Issues ({result.lintIssues.length})</h4>
-          {result.lintIssues.length === 0 ? (
-            <p>No issues found.</p>
-          ) : (
-            <ul>
-              {result.lintIssues.map((issue, i) => (
-                <li key={i}>
-                  Line {issue.line}: [{issue.severity}] {issue.message} (
-                  {issue.rule})
-                </li>
-              ))}
-            </ul>
-          )}
+          <div className="terminal">
+            <div className="terminal-header">
+              lint — {result.lintIssues.length} issue
+              {result.lintIssues.length === 1 ? "" : "s"}
+            </div>
+            {result.lintIssues.length === 0 ? (
+              <div className="lint-empty">✓ no issues found</div>
+            ) : (
+              <ul className="lint-list">
+                {result.lintIssues.map((issue, i) => (
+                  <li key={i} className={`lint-row severity-${issue.severity}`}>
+                    <span className="lint-line">L{issue.line}</span>
+                    <span className="lint-message">{issue.message}</span>
+                    <span className="lint-rule">{issue.rule}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
     </div>
