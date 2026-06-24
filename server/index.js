@@ -68,7 +68,6 @@ app.post("/api/auth/register", authLimiter, async (req, res, next) => {
     const user = new User({ username, email, password: hashedPassword });
     await user.save();
 
-    
     res
       .status(201)
       .json({ message: "User registered successfully", userId: user._id });
@@ -153,7 +152,11 @@ app.post("/api/review", authMiddleware, async (req, res, next) => {
     try {
       aiFeedback = await getAIFeedback(content, fileName);
     } catch (aiErr) {
-      console.error("Gemini call failed:", aiErr.message);
+      console.error("=== GEMINI CALL FAILED ===");
+      console.error("Message:", aiErr.message);
+      console.error("Stack:", aiErr.stack);
+      console.error("Full error object:", JSON.stringify(aiErr, Object.getOwnPropertyNames(aiErr), 2));
+      console.error("==========================");
       aiFeedback = "AI feedback unavailable right now. Please try again later.";
     }
 
@@ -248,6 +251,11 @@ async function processPRReview(owner, repo, pullNumber) {
     try {
       aiFeedback = await getAIFeedback(file.patch, file.filename);
     } catch (err) {
+      console.error("=== GEMINI CALL FAILED (PR REVIEW) ===");
+      console.error("Message:", err.message);
+      console.error("Stack:", err.stack);
+      console.error("Full error object:", JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
+      console.error("==========================");
       aiFeedback = "AI feedback unavailable.";
     }
 
@@ -262,6 +270,6 @@ async function processPRReview(owner, repo, pullNumber) {
 // Centralized error handler - must be registered last
 app.use(errorHandler);
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });

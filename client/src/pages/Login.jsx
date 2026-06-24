@@ -6,11 +6,13 @@ function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    setLoading(true);
 
     try {
       const data = await apiRequest("/api/auth/login", {
@@ -21,35 +23,49 @@ function Login() {
       localStorage.setItem("token", data.token);
       localStorage.setItem("username", data.username);
 
-      navigate("/");
+      navigate("/review");
     } catch (err) {
       setError(err.message);
+    } finally {
+      setLoading(false);
     }
   }
 
   return (
-    <div>
-      <h2>Login</h2>
-      {error && <p style={{ color: "red" }}>{error}</p>}
+    <div className="container container-narrow">
+      <div className="eyebrow">welcome back</div>
+      <h2>Log in</h2>
+
+      {error && <div className="error-text">{error}</div>}
+
       <form onSubmit={handleSubmit}>
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-        <button type="submit">Login</button>
+        <div className="field">
+          <label htmlFor="email">Email</label>
+          <input
+            id="email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </div>
+        <button type="submit" disabled={loading}>
+          {loading ? "Logging in…" : "Log in"}
+        </button>
       </form>
-      <p>
-        Don't have an account? <Link to="/register">Register</Link>
+
+      <p className="helper-text">
+        No account yet? <Link to="/register">Sign up</Link>
       </p>
     </div>
   );
